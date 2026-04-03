@@ -2,7 +2,8 @@ import { google } from "@ai-sdk/google";
 import { convertToModelMessages, stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
 
-const FLIPLET_ORG_ID = 251_686;
+const FLIPLET_ORG_ID = process.env.FLIPLET_ORG_ID ?? "";
+const FLIPLET_APP_ID = process.env.FLIPLET_APP_ID ?? "";
 
 function getBaseUrl() {
   if (process.env.VERCEL_URL) {
@@ -31,7 +32,7 @@ export async function POST(req: Request) {
     system: `You are a helpful assistant that can query Fliplet data sources.
 When a user asks about their data, use the available tools to look up data sources and query records.
 Present the results in a clear, readable format.
-The default organization ID is ${FLIPLET_ORG_ID}. Use it when listing data sources unless the user specifies a different one. Only pass an appId if the user explicitly provides one.`,
+The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLIPLET_APP_ID}. Use the organization ID when listing data sources unless the user specifies a different one. Only pass an appId if the user explicitly provides one.`,
     messages: await convertToModelMessages(messages),
     tools: {
       listDataSources: tool({
