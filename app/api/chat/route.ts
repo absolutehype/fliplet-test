@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     system: `You are a helpful assistant that can query Fliplet data sources.
 When a user asks about their data, use the available tools to look up data sources and query records.
 Present the results in a clear, readable format.
-The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLIPLET_APP_ID}. Use the organization ID when listing data sources unless the user specifies a different one. Only pass an appId if the user explicitly provides one.`,
+The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLIPLET_APP_ID}. Always use the app ID when listing data sources. Only add the organization ID if the user explicitly provides one.`,
     messages: await convertToModelMessages(messages),
     tools: {
       listDataSources: tool({
@@ -50,13 +50,9 @@ The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLI
         }),
         execute: async ({ organizationId, appId }) => {
           const params = new URLSearchParams();
-          if (appId) {
-            params.set("appId", String(appId));
-          } else {
-            params.set(
-              "organizationId",
-              String(organizationId ?? FLIPLET_ORG_ID)
-            );
+          params.set("appId", String(appId ?? FLIPLET_APP_ID));
+          if (organizationId) {
+            params.set("organizationId", String(organizationId));
           }
           const query = params.toString();
           return await flipletFetch(`data-sources${query ? `?${query}` : ""}`);

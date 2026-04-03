@@ -64,6 +64,8 @@ Create `.env.local` in the project root:
 
 ```
 FLIPLET_API_KEY=your_fliplet_api_key
+FLIPLET_ORG_ID=your_fliplet_org_id
+FLIPLET_APP_ID=your_fliplet_app_id
 GOOGLE_GENERATIVE_AI_API_KEY=your_gemini_api_key
 ```
 
