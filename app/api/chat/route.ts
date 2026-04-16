@@ -14,94 +14,153 @@ function getBaseUrl() {
 
 async function flipletFetch(path: string, options?: RequestInit) {
   const baseUrl = getBaseUrl();
-  const response = await fetch(`${baseUrl}/api/fliplet/${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  });
-  return response.json();
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/api/fliplet/${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+      },
+    });
+  } catch (err) {
+    throw new Error(
+      `Failed to reach Fliplet API: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  let data: unknown;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      `Fliplet API returned an unexpected response (HTTP ${response.status})`
+    );
+  }
+
+  if (!response.ok) {
+    const message =
+      (data as Record<string, unknown>)?.message ??
+      (data as Record<string, unknown>)?.error ??
+      `HTTP ${response.status}`;
+    throw new Error(`Fliplet API error (${response.status}): ${message}`);
+  }
+
+  return data;
 }
 
 export async function POST(req: Request) {
-  const { messages } = await req.json();
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    return new Response(
+      JSON.stringify({ error: "AI service is not configured" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
 
-  const result = streamText({
-    model: google("gemini-2.5-flash"),
-    system: `You are a helpful assistant that can query Fliplet data sources.
+  // biome-ignore lint/suspicious/noExplicitAny: request body is untyped
+  let messages: any;
+  try {
+    const body = await req.json();
+    messages = body.messages;
+  } catch {
+    return new Response(JSON.stringify({ error: "Invalid request body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  try {
+    const result = streamText({
+      model: google("gemini-2.5-flash"),
+      system: `You are a helpful assistant that can query Fliplet data sources.
 When a user asks about their data, use the available tools to look up data sources and query records.
 Present the results in a clear, readable format.
 The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLIPLET_APP_ID}. Always use the app ID when listing data sources. Only add the organization ID if the user explicitly provides one.`,
-    messages: await convertToModelMessages(messages),
-    tools: {
-      listDataSources: tool({
-        description:
-          "List all data sources belonging to an organization or app on Fliplet",
-        inputSchema: z.object({
-          organizationId: z
-            .number()
-            .optional()
-            .describe("The organization ID to list data sources for"),
-          appId: z
-            .number()
-            .optional()
-            .describe("The app ID to list data sources for"),
+      messages: await convertToModelMessages(messages),
+      tools: {
+        listDataSources: tool({
+          description:
+            "List all data sources belonging to an organization or app on Fliplet",
+          inputSchema: z.object({
+            organizationId: z
+              .number()
+              .optional()
+              .describe("The organization ID to list data sources for"),
+            appId: z
+              .number()
+              .optional()
+              .describe("The app ID to list data sources for"),
+          }),
+          execute: async ({ organizationId, appId }) => {
+            const params = new URLSearchParams();
+            params.set("appId", String(appId ?? FLIPLET_APP_ID));
+            if (organizationId) {
+              params.set("organizationId", String(organizationId));
+            }
+            const query = params.toString();
+            return await flipletFetch(
+              `data-sources${query ? `?${query}` : ""}`
+            );
+          },
         }),
-        execute: async ({ organizationId, appId }) => {
-          const params = new URLSearchParams();
-          params.set("appId", String(appId ?? FLIPLET_APP_ID));
-          if (organizationId) {
-            params.set("organizationId", String(organizationId));
-          }
-          const query = params.toString();
-          return await flipletFetch(`data-sources${query ? `?${query}` : ""}`);
-        },
-      }),
-      getDataSource: tool({
-        description: "Get metadata about a specific Fliplet data source by ID",
-        inputSchema: z.object({
-          dataSourceId: z.number().describe("The ID of the data source"),
+        getDataSource: tool({
+          description:
+            "Get metadata about a specific Fliplet data source by ID",
+          inputSchema: z.object({
+            dataSourceId: z.number().describe("The ID of the data source"),
+          }),
+          execute: async ({ dataSourceId }) => {
+            return await flipletFetch(`data-sources/${dataSourceId}`);
+          },
         }),
-        execute: async ({ dataSourceId }) => {
-          return await flipletFetch(`data-sources/${dataSourceId}`);
-        },
-      }),
-      queryDataSource: tool({
-        description:
-          "Query records from a Fliplet data source with optional filtering",
-        inputSchema: z.object({
-          dataSourceId: z
-            .number()
-            .describe("The ID of the data source to query"),
-          where: z
-            .record(z.string(), z.unknown())
-            .optional()
-            .describe(
-              "Filter conditions as key-value pairs, e.g. { 'Status': 'Active' }"
-            ),
-          limit: z
-            .number()
-            .optional()
-            .describe("Maximum number of records to return"),
+        queryDataSource: tool({
+          description:
+            "Query records from a Fliplet data source with optional filtering",
+          inputSchema: z.object({
+            dataSourceId: z
+              .number()
+              .describe("The ID of the data source to query"),
+            where: z
+              .record(z.string(), z.unknown())
+              .optional()
+              .describe(
+                "Filter conditions as key-value pairs, e.g. { 'Status': 'Active' }"
+              ),
+            limit: z
+              .number()
+              .optional()
+              .describe("Maximum number of records to return"),
+          }),
+          execute: async ({ dataSourceId, where, limit }) => {
+            const body: Record<string, unknown> = {};
+            if (where) {
+              body.where = where;
+            }
+            if (limit) {
+              body.limit = limit;
+            }
+            return await flipletFetch(
+              `data-sources/${dataSourceId}/data/query`,
+              {
+                method: "POST",
+                body: JSON.stringify(body),
+              }
+            );
+          },
         }),
-        execute: async ({ dataSourceId, where, limit }) => {
-          const body: Record<string, unknown> = {};
-          if (where) {
-            body.where = where;
-          }
-          if (limit) {
-            body.limit = limit;
-          }
-          return await flipletFetch(`data-sources/${dataSourceId}/data/query`, {
-            method: "POST",
-            body: JSON.stringify(body),
-          });
-        },
-      }),
-    },
-    stopWhen: stepCountIs(5),
-  });
+      },
+      stopWhen: stepCountIs(5),
+    });
 
-  return result.toUIMessageStreamResponse();
+    return result.toUIMessageStreamResponse();
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "An unexpected error occurred";
+    const status = message.includes("429") ? 429 : 500;
+    return new Response(JSON.stringify({ error: message }), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 }

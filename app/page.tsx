@@ -21,6 +21,33 @@ import {
   saveSession,
 } from "@/lib/sessions";
 
+function friendlyErrorMessage(error: Error): string {
+  const msg = error.message ?? "";
+  if (msg.includes("429") || msg.toLowerCase().includes("rate limit")) {
+    return "The AI service is temporarily busy. Please try again in a moment.";
+  }
+  if (msg.includes("401") || msg.includes("403")) {
+    return "Authentication failed. Please check your API credentials.";
+  }
+  if (
+    msg.toLowerCase().includes("not configured") ||
+    msg.toLowerCase().includes("api key")
+  ) {
+    return "The AI service is not configured. Please contact the administrator.";
+  }
+  if (
+    msg.toLowerCase().includes("failed to fetch") ||
+    msg.toLowerCase().includes("network") ||
+    msg.toLowerCase().includes("failed to reach")
+  ) {
+    return "Unable to reach the server. Please check your connection and try again.";
+  }
+  if (msg.length > 0 && msg.length < 200) {
+    return msg;
+  }
+  return "Something went wrong. Please try again.";
+}
+
 const EXAMPLE_PROMPTS = [
   "List all my data sources",
   "Show me records from a data source",
@@ -37,10 +64,11 @@ export default function Chat() {
   const activeSession = activeId ? getSession(activeId) : undefined;
   const chatId = activeId ?? "new";
 
-  const { messages, sendMessage, status, error, setMessages } = useChat({
-    id: chatId,
-    messages: activeSession?.messages as UIMessage[] | undefined,
-  });
+  const { messages, sendMessage, status, error, setMessages, regenerate } =
+    useChat({
+      id: chatId,
+      messages: activeSession?.messages as UIMessage[] | undefined,
+    });
 
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -280,6 +308,24 @@ export default function Chat() {
                         {prompt}
                       </motion.button>
                     ))}
+                    {error && (
+                      <motion.div
+                        animate={{ opacity: 1, y: 0 }}
+                        className="message message-error launch-error"
+                        initial={{ opacity: 0, y: 6 }}
+                        key="launch-error"
+                        transition={{ duration: 0.35 }}
+                      >
+                        {friendlyErrorMessage(error)}
+                        <button
+                          className="error-retry"
+                          onClick={() => regenerate()}
+                          type="button"
+                        >
+                          Try again
+                        </button>
+                      </motion.div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -335,7 +381,14 @@ export default function Chat() {
                         key="error"
                         transition={{ duration: 0.35 }}
                       >
-                        Something went wrong. Please try again.
+                        {friendlyErrorMessage(error)}
+                        <button
+                          className="error-retry"
+                          onClick={() => regenerate()}
+                          type="button"
+                        >
+                          Try again
+                        </button>
                       </motion.div>
                     )}
                   </AnimatePresence>
