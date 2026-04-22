@@ -2,9 +2,6 @@ import { google } from "@ai-sdk/google";
 import { convertToModelMessages, stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
 
-const FLIPLET_ORG_ID = process.env.FLIPLET_ORG_ID ?? "";
-const FLIPLET_APP_ID = process.env.FLIPLET_APP_ID ?? "";
-
 function getBaseUrl() {
   if (process.env.VERCEL_URL) {
     return `https://${process.env.VERCEL_URL}`;
@@ -12,7 +9,11 @@ function getBaseUrl() {
   return "http://localhost:3000";
 }
 
-async function flipletFetch(path: string, options?: RequestInit) {
+async function flipletFetch(
+  path: string,
+  apiKey: string,
+  options?: RequestInit
+) {
   const baseUrl = getBaseUrl();
 
   let response: Response;
@@ -21,6 +22,7 @@ async function flipletFetch(path: string, options?: RequestInit) {
       ...options,
       headers: {
         "Content-Type": "application/json",
+        "X-Fliplet-Token": apiKey,
         ...options?.headers,
       },
     });
@@ -60,14 +62,28 @@ export async function POST(req: Request) {
 
   // biome-ignore lint/suspicious/noExplicitAny: request body is untyped
   let messages: any;
+  let apiKey = "";
+  let orgId = "";
+  let appId = "";
+
   try {
     const body = await req.json();
     messages = body.messages;
+    apiKey = body.apiKey ?? "";
+    orgId = body.orgId ?? "";
+    appId = body.appId ?? "";
   } catch {
     return new Response(JSON.stringify({ error: "Invalid request body" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  if (!apiKey) {
+    return new Response(
+      JSON.stringify({ error: "Fliplet API key is required" }),
+      { status: 400, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   try {
@@ -76,7 +92,7 @@ export async function POST(req: Request) {
       system: `You are a helpful assistant that can query Fliplet data sources.
 When a user asks about their data, use the available tools to look up data sources and query records.
 Present the results in a clear, readable format.
-The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLIPLET_APP_ID}. Always use the app ID when listing data sources. Only add the organization ID if the user explicitly provides one.`,
+The default organization ID is ${orgId} and the default app ID is ${appId}. Always use the app ID when listing data sources. Only add the organization ID if the user explicitly provides one.`,
       messages: await convertToModelMessages(messages),
       tools: {
         listDataSources: tool({
@@ -92,15 +108,16 @@ The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLI
               .optional()
               .describe("The app ID to list data sources for"),
           }),
-          execute: async ({ organizationId, appId }) => {
+          execute: async ({ organizationId, appId: toolAppId }) => {
             const params = new URLSearchParams();
-            params.set("appId", String(appId ?? FLIPLET_APP_ID));
+            params.set("appId", String(toolAppId ?? appId));
             if (organizationId) {
               params.set("organizationId", String(organizationId));
             }
             const query = params.toString();
             return await flipletFetch(
-              `data-sources${query ? `?${query}` : ""}`
+              `data-sources${query ? `?${query}` : ""}`,
+              apiKey
             );
           },
         }),
@@ -111,7 +128,7 @@ The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLI
             dataSourceId: z.number().describe("The ID of the data source"),
           }),
           execute: async ({ dataSourceId }) => {
-            return await flipletFetch(`data-sources/${dataSourceId}`);
+            return await flipletFetch(`data-sources/${dataSourceId}`, apiKey);
           },
         }),
         queryDataSource: tool({
@@ -142,6 +159,7 @@ The default organization ID is ${FLIPLET_ORG_ID} and the default app ID is ${FLI
             }
             return await flipletFetch(
               `data-sources/${dataSourceId}/data/query`,
+              apiKey,
               {
                 method: "POST",
                 body: JSON.stringify(body),

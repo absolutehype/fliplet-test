@@ -1,13 +1,14 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
-import type { UIMessage } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import {
   type FormEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -61,13 +62,42 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pendingMessage = useRef<string | null>(null);
 
+  // Credential form state
+  const [credApiKey, setCredApiKey] = useState("");
+  const [credOrgId, setCredOrgId] = useState("");
+  const [credAppId, setCredAppId] = useState("");
+  const [credentialsReady, setCredentialsReady] = useState(false);
+
+  // Active session credentials (for useChat body)
+  const [sessionCreds, setSessionCreds] = useState({
+    apiKey: "",
+    appId: "",
+    orgId: "",
+  });
+
   const activeSession = activeId ? getSession(activeId) : undefined;
   const chatId = activeId ?? "new";
+
+  const sessionCredsRef = useRef(sessionCreds);
+  sessionCredsRef.current = sessionCreds;
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        body: () => ({
+          apiKey: sessionCredsRef.current.apiKey,
+          appId: sessionCredsRef.current.appId,
+          orgId: sessionCredsRef.current.orgId,
+        }),
+      }),
+    []
+  );
 
   const { messages, sendMessage, status, error, setMessages, regenerate } =
     useChat({
       id: chatId,
       messages: activeSession?.messages as UIMessage[] | undefined,
+      transport,
     });
 
   const [input, setInput] = useState("");
@@ -118,19 +148,47 @@ export default function Chat() {
       : "New chat";
 
     const session: ChatSession = {
+      apiKey: sessionCreds.apiKey,
+      appId: sessionCreds.appId,
       createdAt: activeSession?.createdAt ?? Date.now(),
       id: activeId,
       messages,
+      orgId: sessionCreds.orgId,
       title,
     };
     saveSession(session);
     setSessions(getSessions());
   }, [messages, activeId]);
 
+  // When switching sessions, load that session's credentials
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sync creds when activeSession changes
+  useEffect(() => {
+    if (activeSession) {
+      setSessionCreds({
+        apiKey: activeSession.apiKey,
+        appId: activeSession.appId,
+        orgId: activeSession.orgId,
+      });
+    }
+  }, [activeId]);
+
   const startNewSession = (text: string) => {
     const newId = generateId();
     pendingMessage.current = text;
+    setSessionCreds({
+      apiKey: credApiKey,
+      appId: credAppId,
+      orgId: credOrgId,
+    });
     setActiveId(newId);
+  };
+
+  const handleCredentialsSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!(credApiKey.trim() && credAppId.trim())) {
+      return;
+    }
+    setCredentialsReady(true);
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -161,6 +219,10 @@ export default function Chat() {
     setMessages([]);
     setInput("");
     setSidebarOpen(false);
+    setCredentialsReady(false);
+    setCredApiKey("");
+    setCredOrgId("");
+    setCredAppId("");
   }, [setMessages]);
 
   const handleSelectSession = useCallback(
@@ -169,6 +231,11 @@ export default function Chat() {
       if (session) {
         setActiveId(id);
         setMessages(session.messages as UIMessage[]);
+        setSessionCreds({
+          apiKey: session.apiKey,
+          appId: session.appId,
+          orgId: session.orgId,
+        });
         setSidebarOpen(false);
       }
     },
@@ -281,56 +348,134 @@ export default function Chat() {
                   key="launch"
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 >
-                  <h2 className="launch-greeting">Hello, how can I help?</h2>
-                  <form className="launch-form" onSubmit={handleSubmit}>
-                    <input
-                      aria-label="Chat message"
-                      className="chat-input launch-input"
-                      onChange={(e) => setInput(e.target.value)}
-                      placeholder="Ask about your data sources..."
-                      value={input}
-                    />
-                    <button
-                      className="chat-submit"
-                      disabled={!input.trim()}
-                      type="submit"
-                    >
-                      Send
-                    </button>
-                  </form>
-                  <div className="launch-prompts">
-                    {EXAMPLE_PROMPTS.map((prompt, i) => (
-                      <motion.button
-                        animate={{ opacity: 1, y: 0 }}
-                        className="launch-prompt"
-                        initial={{ opacity: 0, y: 8 }}
-                        key={prompt}
-                        onClick={() => handlePromptClick(prompt)}
-                        transition={{ delay: 0.3 + i * 0.1, duration: 0.4 }}
-                        type="button"
-                      >
-                        {prompt}
-                      </motion.button>
-                    ))}
-                    {error && (
-                      <motion.div
-                        animate={{ opacity: 1, y: 0 }}
-                        className="message message-error launch-error"
-                        initial={{ opacity: 0, y: 6 }}
-                        key="launch-error"
-                        transition={{ duration: 0.35 }}
-                      >
-                        {friendlyErrorMessage(error)}
+                  {credentialsReady ? (
+                    <>
+                      <h2 className="launch-greeting">
+                        Hello, how can I help?
+                      </h2>
+                      <form className="launch-form" onSubmit={handleSubmit}>
+                        <input
+                          aria-label="Chat message"
+                          className="chat-input launch-input"
+                          onChange={(e) => setInput(e.target.value)}
+                          placeholder="Ask about your data sources..."
+                          value={input}
+                        />
                         <button
-                          className="error-retry"
-                          onClick={() => regenerate()}
-                          type="button"
+                          className="chat-submit"
+                          disabled={!input.trim()}
+                          type="submit"
                         >
-                          Try again
+                          Send
                         </button>
-                      </motion.div>
-                    )}
-                  </div>
+                      </form>
+                      <div className="launch-prompts">
+                        {EXAMPLE_PROMPTS.map((prompt, i) => (
+                          <motion.button
+                            animate={{ opacity: 1, y: 0 }}
+                            className="launch-prompt"
+                            initial={{ opacity: 0, y: 8 }}
+                            key={prompt}
+                            onClick={() => handlePromptClick(prompt)}
+                            transition={{
+                              delay: 0.3 + i * 0.1,
+                              duration: 0.4,
+                            }}
+                            type="button"
+                          >
+                            {prompt}
+                          </motion.button>
+                        ))}
+                        {error && (
+                          <motion.div
+                            animate={{ opacity: 1, y: 0 }}
+                            className="message message-error launch-error"
+                            initial={{ opacity: 0, y: 6 }}
+                            key="launch-error"
+                            transition={{ duration: 0.35 }}
+                          >
+                            {friendlyErrorMessage(error)}
+                            <button
+                              className="error-retry"
+                              onClick={() => regenerate()}
+                              type="button"
+                            >
+                              Try again
+                            </button>
+                          </motion.div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <h2 className="launch-greeting">
+                        Welcome to Fliplet Data Chat
+                      </h2>
+                      <p className="launch-subtitle">
+                        To get started, please provide your Fliplet credentials
+                        below.
+                      </p>
+                      <form
+                        className="credentials-form"
+                        onSubmit={handleCredentialsSubmit}
+                      >
+                        <label
+                          className="credentials-label"
+                          htmlFor="cred-api-key"
+                        >
+                          API Key
+                          <input
+                            className="credentials-input"
+                            id="cred-api-key"
+                            onChange={(e) => setCredApiKey(e.target.value)}
+                            placeholder="Your Fliplet API key"
+                            required
+                            type="password"
+                            value={credApiKey}
+                          />
+                        </label>
+                        <label
+                          className="credentials-label"
+                          htmlFor="cred-app-id"
+                        >
+                          App ID
+                          <input
+                            className="credentials-input"
+                            id="cred-app-id"
+                            onChange={(e) => setCredAppId(e.target.value)}
+                            placeholder="e.g. 449877"
+                            required
+                            type="text"
+                            value={credAppId}
+                          />
+                        </label>
+                        <label
+                          className="credentials-label"
+                          htmlFor="cred-org-id"
+                        >
+                          Organisation ID{" "}
+                          <span className="credentials-optional">
+                            (optional)
+                          </span>
+                          <input
+                            className="credentials-input"
+                            id="cred-org-id"
+                            onChange={(e) => setCredOrgId(e.target.value)}
+                            placeholder="e.g. 251686"
+                            type="text"
+                            value={credOrgId}
+                          />
+                        </label>
+                        <button
+                          className="chat-submit credentials-submit"
+                          disabled={!(credApiKey.trim() && credAppId.trim())}
+                          type="submit"
+                        >
+                          Get Started
+                        </button>
+                      </form>
+                    </>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

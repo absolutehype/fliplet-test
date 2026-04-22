@@ -7,10 +7,11 @@ app.use(express.json());
 const FLIPLET_API_BASE = "https://api.fliplet.com/v1";
 
 app.all("/api/fliplet/*splat", async (req, res) => {
-  const apiKey = process.env.FLIPLET_API_KEY;
+  const apiKey =
+    (req.headers["x-fliplet-token"] as string) ?? process.env.FLIPLET_API_KEY;
 
   if (!apiKey) {
-    res.status(500).json({ error: "FLIPLET_API_KEY is not configured" });
+    res.status(400).json({ error: "Fliplet API key is required" });
     return;
   }
 

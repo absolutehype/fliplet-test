@@ -3,9 +3,12 @@ import type { UIMessage } from "ai";
 const STORAGE_KEY = "fliplet-chat-sessions";
 
 export interface ChatSession {
+  apiKey: string;
+  appId: string;
   createdAt: number;
   id: string;
   messages: UIMessage[];
+  orgId: string;
   title: string;
 }
 

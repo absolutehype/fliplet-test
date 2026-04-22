@@ -15,12 +15,11 @@ Fliplet Data Chat — an AI chatbot that queries Fliplet data sources via a prox
 
 ## Environment Variables
 
-All stored in `.env.local` (not committed):
+Stored in `.env.local` (not committed):
 
-- `FLIPLET_API_KEY` — Fliplet REST API auth token
-- `FLIPLET_ORG_ID` — Fliplet organization ID
-- `FLIPLET_APP_ID` — Fliplet app ID
 - `GOOGLE_GENERATIVE_AI_API_KEY` — Google Gemini API key
+
+Fliplet credentials (`API Key`, `App ID`, `Organisation ID`) are provided by the user at chat launch and stored per-session in localStorage.
 
 ## Architecture
 
