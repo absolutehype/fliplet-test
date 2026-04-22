@@ -79,25 +79,44 @@ export async function POST(req: Request) {
     });
   }
 
-  if (!apiKey) {
-    return new Response(
-      JSON.stringify({ error: "Fliplet API key is required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  const hasCredentials = apiKey.length > 0;
 
   try {
     const result = streamText({
       model: google("gemini-2.5-flash"),
       system: `You are a helpful assistant that can query Fliplet data sources.
-When a user asks about their data, use the available tools to look up data sources and query records.
-Present the results in a clear, readable format.
-The default organization ID is ${orgId} and the default app ID is ${appId}. Always use the app ID when listing data sources. Only add the organization ID if the user explicitly provides one.`,
+
+${
+  hasCredentials
+    ? `The user has provided their credentials. The default organization ID is ${orgId} and the default app ID is ${appId}. Always use the app ID when listing data sources. Only add the organization ID if the user explicitly provides one.
+When a user asks about their data, use the available tools to look up data sources and query records. Present the results in a clear, readable format.`
+    : `The user has not yet provided their Fliplet credentials. Before you can help them with data sources, you need to collect their credentials.
+
+Greet the user warmly, then ask them to provide the following:
+1. Their Fliplet API Key (required)
+2. Their Fliplet App ID (required)
+3. Their Fliplet Organisation ID (optional)
+
+Once the user provides these details, call the storeCredentials tool with the values. Do NOT attempt to use any other Fliplet tools until credentials have been stored.`
+}`,
       messages: await convertToModelMessages(messages),
       tools: {
+        storeCredentials: tool({
+          description:
+            "Store the user's Fliplet credentials for this chat session. Call this after the user provides their API key and App ID.",
+          inputSchema: z.object({
+            apiKey: z.string().describe("The user's Fliplet API key"),
+            appId: z.string().describe("The user's Fliplet App ID"),
+            orgId: z
+              .string()
+              .optional()
+              .describe("The user's Fliplet Organisation ID (optional)"),
+          }),
+          // No execute — handled client-side via onToolCall
+        }),
         listDataSources: tool({
           description:
-            "List all data sources belonging to an organization or app on Fliplet",
+            "List all data sources belonging to an organization or app on Fliplet. Requires credentials to be stored first.",
           inputSchema: z.object({
             organizationId: z
               .number()
@@ -109,6 +128,12 @@ The default organization ID is ${orgId} and the default app ID is ${appId}. Alwa
               .describe("The app ID to list data sources for"),
           }),
           execute: async ({ organizationId, appId: toolAppId }) => {
+            if (!apiKey) {
+              return {
+                error:
+                  "Credentials not configured. Please provide your Fliplet credentials first.",
+              };
+            }
             const params = new URLSearchParams();
             params.set("appId", String(toolAppId ?? appId));
             if (organizationId) {
@@ -123,17 +148,23 @@ The default organization ID is ${orgId} and the default app ID is ${appId}. Alwa
         }),
         getDataSource: tool({
           description:
-            "Get metadata about a specific Fliplet data source by ID",
+            "Get metadata about a specific Fliplet data source by ID. Requires credentials to be stored first.",
           inputSchema: z.object({
             dataSourceId: z.number().describe("The ID of the data source"),
           }),
           execute: async ({ dataSourceId }) => {
+            if (!apiKey) {
+              return {
+                error:
+                  "Credentials not configured. Please provide your Fliplet credentials first.",
+              };
+            }
             return await flipletFetch(`data-sources/${dataSourceId}`, apiKey);
           },
         }),
         queryDataSource: tool({
           description:
-            "Query records from a Fliplet data source with optional filtering",
+            "Query records from a Fliplet data source with optional filtering. Requires credentials to be stored first.",
           inputSchema: z.object({
             dataSourceId: z
               .number()
@@ -150,6 +181,12 @@ The default organization ID is ${orgId} and the default app ID is ${appId}. Alwa
               .describe("Maximum number of records to return"),
           }),
           execute: async ({ dataSourceId, where, limit }) => {
+            if (!apiKey) {
+              return {
+                error:
+                  "Credentials not configured. Please provide your Fliplet credentials first.",
+              };
+            }
             const body: Record<string, unknown> = {};
             if (where) {
               body.where = where;

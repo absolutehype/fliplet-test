@@ -62,13 +62,7 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const pendingMessage = useRef<string | null>(null);
 
-  // Credential form state
-  const [credApiKey, setCredApiKey] = useState("");
-  const [credOrgId, setCredOrgId] = useState("");
-  const [credAppId, setCredAppId] = useState("");
-  const [credentialsReady, setCredentialsReady] = useState(false);
-
-  // Active session credentials (for useChat body)
+  // Per-session credentials (sent with every chat request)
   const [sessionCreds, setSessionCreds] = useState({
     apiKey: "",
     appId: "",
@@ -93,12 +87,41 @@ export default function Chat() {
     []
   );
 
-  const { messages, sendMessage, status, error, setMessages, regenerate } =
-    useChat({
-      id: chatId,
-      messages: activeSession?.messages as UIMessage[] | undefined,
-      transport,
-    });
+  const {
+    messages,
+    sendMessage,
+    status,
+    error,
+    setMessages,
+    regenerate,
+    addToolResult,
+  } = useChat({
+    id: chatId,
+    messages: activeSession?.messages as UIMessage[] | undefined,
+    transport,
+    onToolCall: ({ toolCall }) => {
+      if (toolCall.toolName === "storeCredentials") {
+        const input = toolCall.input as {
+          apiKey: string;
+          appId: string;
+          orgId?: string;
+        };
+        const creds = {
+          apiKey: input.apiKey,
+          appId: input.appId,
+          orgId: input.orgId ?? "",
+        };
+        sessionCredsRef.current = creds;
+        setSessionCreds(creds);
+        addToolResult({
+          tool: "storeCredentials",
+          toolCallId: toolCall.toolCallId,
+          output:
+            "Credentials stored successfully. You can now query Fliplet data sources.",
+        });
+      }
+    },
+  });
 
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -148,12 +171,12 @@ export default function Chat() {
       : "New chat";
 
     const session: ChatSession = {
-      apiKey: sessionCreds.apiKey,
-      appId: sessionCreds.appId,
+      apiKey: sessionCredsRef.current.apiKey,
+      appId: sessionCredsRef.current.appId,
       createdAt: activeSession?.createdAt ?? Date.now(),
       id: activeId,
       messages,
-      orgId: sessionCreds.orgId,
+      orgId: sessionCredsRef.current.orgId,
       title,
     };
     saveSession(session);
@@ -164,31 +187,20 @@ export default function Chat() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: sync creds when activeSession changes
   useEffect(() => {
     if (activeSession) {
-      setSessionCreds({
+      const creds = {
         apiKey: activeSession.apiKey,
         appId: activeSession.appId,
         orgId: activeSession.orgId,
-      });
+      };
+      setSessionCreds(creds);
+      sessionCredsRef.current = creds;
     }
   }, [activeId]);
 
   const startNewSession = (text: string) => {
     const newId = generateId();
     pendingMessage.current = text;
-    setSessionCreds({
-      apiKey: credApiKey,
-      appId: credAppId,
-      orgId: credOrgId,
-    });
     setActiveId(newId);
-  };
-
-  const handleCredentialsSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!(credApiKey.trim() && credAppId.trim())) {
-      return;
-    }
-    setCredentialsReady(true);
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -219,10 +231,8 @@ export default function Chat() {
     setMessages([]);
     setInput("");
     setSidebarOpen(false);
-    setCredentialsReady(false);
-    setCredApiKey("");
-    setCredOrgId("");
-    setCredAppId("");
+    setSessionCreds({ apiKey: "", appId: "", orgId: "" });
+    sessionCredsRef.current = { apiKey: "", appId: "", orgId: "" };
   }, [setMessages]);
 
   const handleSelectSession = useCallback(
@@ -231,11 +241,13 @@ export default function Chat() {
       if (session) {
         setActiveId(id);
         setMessages(session.messages as UIMessage[]);
-        setSessionCreds({
+        const creds = {
           apiKey: session.apiKey,
           appId: session.appId,
           orgId: session.orgId,
-        });
+        };
+        setSessionCreds(creds);
+        sessionCredsRef.current = creds;
         setSidebarOpen(false);
       }
     },
@@ -348,134 +360,56 @@ export default function Chat() {
                   key="launch"
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 >
-                  {credentialsReady ? (
-                    <>
-                      <h2 className="launch-greeting">
-                        Hello, how can I help?
-                      </h2>
-                      <form className="launch-form" onSubmit={handleSubmit}>
-                        <input
-                          aria-label="Chat message"
-                          className="chat-input launch-input"
-                          onChange={(e) => setInput(e.target.value)}
-                          placeholder="Ask about your data sources..."
-                          value={input}
-                        />
-                        <button
-                          className="chat-submit"
-                          disabled={!input.trim()}
-                          type="submit"
-                        >
-                          Send
-                        </button>
-                      </form>
-                      <div className="launch-prompts">
-                        {EXAMPLE_PROMPTS.map((prompt, i) => (
-                          <motion.button
-                            animate={{ opacity: 1, y: 0 }}
-                            className="launch-prompt"
-                            initial={{ opacity: 0, y: 8 }}
-                            key={prompt}
-                            onClick={() => handlePromptClick(prompt)}
-                            transition={{
-                              delay: 0.3 + i * 0.1,
-                              duration: 0.4,
-                            }}
-                            type="button"
-                          >
-                            {prompt}
-                          </motion.button>
-                        ))}
-                        {error && (
-                          <motion.div
-                            animate={{ opacity: 1, y: 0 }}
-                            className="message message-error launch-error"
-                            initial={{ opacity: 0, y: 6 }}
-                            key="launch-error"
-                            transition={{ duration: 0.35 }}
-                          >
-                            {friendlyErrorMessage(error)}
-                            <button
-                              className="error-retry"
-                              onClick={() => regenerate()}
-                              type="button"
-                            >
-                              Try again
-                            </button>
-                          </motion.div>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <h2 className="launch-greeting">
-                        Welcome to Fliplet Data Chat
-                      </h2>
-                      <p className="launch-subtitle">
-                        To get started, please provide your Fliplet credentials
-                        below.
-                      </p>
-                      <form
-                        className="credentials-form"
-                        onSubmit={handleCredentialsSubmit}
+                  <h2 className="launch-greeting">Hello, how can I help?</h2>
+                  <form className="launch-form" onSubmit={handleSubmit}>
+                    <input
+                      aria-label="Chat message"
+                      className="chat-input launch-input"
+                      onChange={(e) => setInput(e.target.value)}
+                      placeholder="Ask about your data sources..."
+                      value={input}
+                    />
+                    <button
+                      className="chat-submit"
+                      disabled={!input.trim()}
+                      type="submit"
+                    >
+                      Send
+                    </button>
+                  </form>
+                  <div className="launch-prompts">
+                    {EXAMPLE_PROMPTS.map((prompt, i) => (
+                      <motion.button
+                        animate={{ opacity: 1, y: 0 }}
+                        className="launch-prompt"
+                        initial={{ opacity: 0, y: 8 }}
+                        key={prompt}
+                        onClick={() => handlePromptClick(prompt)}
+                        transition={{ delay: 0.3 + i * 0.1, duration: 0.4 }}
+                        type="button"
                       >
-                        <label
-                          className="credentials-label"
-                          htmlFor="cred-api-key"
-                        >
-                          API Key
-                          <input
-                            className="credentials-input"
-                            id="cred-api-key"
-                            onChange={(e) => setCredApiKey(e.target.value)}
-                            placeholder="Your Fliplet API key"
-                            required
-                            type="password"
-                            value={credApiKey}
-                          />
-                        </label>
-                        <label
-                          className="credentials-label"
-                          htmlFor="cred-app-id"
-                        >
-                          App ID
-                          <input
-                            className="credentials-input"
-                            id="cred-app-id"
-                            onChange={(e) => setCredAppId(e.target.value)}
-                            placeholder="e.g. 449877"
-                            required
-                            type="text"
-                            value={credAppId}
-                          />
-                        </label>
-                        <label
-                          className="credentials-label"
-                          htmlFor="cred-org-id"
-                        >
-                          Organisation ID{" "}
-                          <span className="credentials-optional">
-                            (optional)
-                          </span>
-                          <input
-                            className="credentials-input"
-                            id="cred-org-id"
-                            onChange={(e) => setCredOrgId(e.target.value)}
-                            placeholder="e.g. 251686"
-                            type="text"
-                            value={credOrgId}
-                          />
-                        </label>
+                        {prompt}
+                      </motion.button>
+                    ))}
+                    {error && (
+                      <motion.div
+                        animate={{ opacity: 1, y: 0 }}
+                        className="message message-error launch-error"
+                        initial={{ opacity: 0, y: 6 }}
+                        key="launch-error"
+                        transition={{ duration: 0.35 }}
+                      >
+                        {friendlyErrorMessage(error)}
                         <button
-                          className="chat-submit credentials-submit"
-                          disabled={!(credApiKey.trim() && credAppId.trim())}
-                          type="submit"
+                          className="error-retry"
+                          onClick={() => regenerate()}
+                          type="button"
                         >
-                          Get Started
+                          Try again
                         </button>
-                      </form>
-                    </>
-                  )}
+                      </motion.div>
+                    )}
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>
