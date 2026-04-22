@@ -244,13 +244,17 @@ export default function Chat() {
             </button>
             <nav className="sidebar-sessions">
               {sessions.map((session) => (
-                <button
+                <div
                   className={`sidebar-session ${session.id === activeId ? "sidebar-session-active" : ""}`}
                   key={session.id}
-                  onClick={() => handleSelectSession(session.id)}
-                  type="button"
                 >
-                  <span className="sidebar-session-title">{session.title}</span>
+                  <button
+                    className="sidebar-session-select"
+                    onClick={() => handleSelectSession(session.id)}
+                    type="button"
+                  >
+                    {session.title}
+                  </button>
                   <button
                     aria-label={`Delete ${session.title}`}
                     className="sidebar-session-delete"
@@ -259,7 +263,7 @@ export default function Chat() {
                   >
                     &times;
                   </button>
-                </button>
+                </div>
               ))}
             </nav>
           </aside>
