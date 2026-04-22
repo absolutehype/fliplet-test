@@ -24,7 +24,12 @@ import {
 
 function friendlyErrorMessage(error: Error): string {
   const msg = error.message ?? "";
-  if (msg.includes("429") || msg.toLowerCase().includes("rate limit")) {
+  if (
+    msg.includes("429") ||
+    msg.includes("503") ||
+    msg.toLowerCase().includes("rate limit") ||
+    msg.toLowerCase().includes("high demand")
+  ) {
     return "The AI service is temporarily busy. Please try again in a moment.";
   }
   if (msg.includes("401") || msg.includes("403")) {

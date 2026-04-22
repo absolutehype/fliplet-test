@@ -212,7 +212,11 @@ Once the user provides these details, call the storeCredentials tool with the va
   } catch (err) {
     const message =
       err instanceof Error ? err.message : "An unexpected error occurred";
-    const status = message.includes("429") ? 429 : 500;
+    const isOverloaded =
+      message.includes("429") ||
+      message.includes("503") ||
+      message.toLowerCase().includes("high demand");
+    const status = isOverloaded ? 429 : 500;
     return new Response(JSON.stringify({ error: message }), {
       status,
       headers: { "Content-Type": "application/json" },
